@@ -150,20 +150,70 @@ func (s *SkillService) GetSkill(skillName, outputDir string) error {
 	return fmt.Errorf("重试 %d 次后仍失败", maxRetries)
 }
 
+// SkillDetailResponse represents the response from get skill detail API
+type SkillDetailResponse struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Instruction string         `json:"instruction"`
+	UniformId   interface{}    `json:"uniformId"`
+	Resources   []ResourceItem `json:"resources"`
+}
+
+// ResourceItem represents a resource in skill detail response
+type ResourceItem struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Content string `json:"content"`
+}
+
 // getSkillWithValidation retrieves a skill with uniformId validation
 func (s *SkillService) getSkillWithValidation(skillName, outputDir string) error {
-	group := fmt.Sprintf("skill_%s", skillName)
+	// Call /v3/admin/ai/skills API to get skill detail
+	params := url.Values{}
+	params.Set("namespaceId", s.client.Namespace)
+	params.Set("skillName", skillName)
 
-	// Get skill.json
-	skillJSON, err := s.client.GetConfig("skill.json", group)
+	apiURL := fmt.Sprintf("http://%s/nacos/v3/admin/ai/skills?%s",
+		s.client.ServerAddr, params.Encode())
+
+	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to get skill.json: %w", err)
+		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Parse skill data
-	var skill Skill
-	if err := json.Unmarshal([]byte(skillJSON), &skill); err != nil {
-		return fmt.Errorf("failed to parse skill.json: %w", err)
+	if s.client.AccessToken != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.client.AccessToken))
+	}
+
+	httpClient := &http.Client{}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("get skill failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("get skill failed: status=%d, body=%s", resp.StatusCode, string(respBody))
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response failed: %w", err)
+	}
+
+	var v3Resp V3Response
+	if err := json.Unmarshal(respBody, &v3Resp); err != nil {
+		return fmt.Errorf("parse response failed: %w", err)
+	}
+
+	if v3Resp.Code != 0 {
+		return fmt.Errorf("get skill failed: code=%d, message=%s", v3Resp.Code, v3Resp.Message)
+	}
+
+	var skillDetail SkillDetailResponse
+	if err := json.Unmarshal(v3Resp.Data, &skillDetail); err != nil {
+		return fmt.Errorf("parse skill detail failed: %w", err)
 	}
 
 	// Create output directory
@@ -172,62 +222,24 @@ func (s *SkillService) getSkillWithValidation(skillName, outputDir string) error
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	// Download resources
+	// Save resources
 	resourceContents := make(map[string]map[string]interface{})
-	for _, resourceInfo := range skill.Resources {
-		resourceName := resourceInfo["name"]
-		if resourceName == "" {
+	for _, resource := range skillDetail.Resources {
+		if resource.Name == "" {
 			continue
 		}
 
-		resourceType := resourceInfo["type"]
-
-		// Construct dataId: resource_{type}_{name}.json
-		// Replace . with __ in name (e.g., init_skill.py -> init_skill__py)
-		normalizedName := strings.ReplaceAll(resourceName, ".", "__")
-		resourceDataID := fmt.Sprintf("resource_%s_%s.json", resourceType, normalizedName)
-		resourceJSON, err := s.client.GetConfig(resourceDataID, group)
-		if err != nil {
-			continue
-		}
-
-		var resourceData map[string]interface{}
-		if err := json.Unmarshal([]byte(resourceJSON), &resourceData); err != nil {
-			continue
-		}
-
-		// Validate uniformId consistency
-		skillUniformIdStr := normalizeUniformId(skill.UniformId)
-		resourceUniformIdStr := normalizeUniformId(resourceData["uniformId"])
-
-		if skillUniformIdStr != "" && resourceUniformIdStr != "" && resourceUniformIdStr != skillUniformIdStr {
-			return fmt.Errorf("uniformId mismatch: skill.json has '%s', but resource '%s' has '%s'",
-				skillUniformIdStr, resourceName, resourceUniformIdStr)
-		}
-
-		resourceContents[resourceName] = resourceData
-
-		// Save resource file
-		finalName, ok := resourceData["name"].(string)
-		if !ok {
-			continue
-		}
-
-		finalType, ok := resourceData["type"].(string)
-		if !ok {
-			continue
-		}
-
-		content, ok := resourceData["content"].(string)
-		if !ok {
-			continue
+		resourceContents[resource.Name] = map[string]interface{}{
+			"name":    resource.Name,
+			"type":    resource.Type,
+			"content": resource.Content,
 		}
 
 		// Determine file directory based on type
 		var fileDir string
-		if finalType != "" {
+		if resource.Type != "" {
 			// If type is specified, use it as subdirectory name
-			fileDir = filepath.Join(skillDir, finalType)
+			fileDir = filepath.Join(skillDir, resource.Type)
 		} else {
 			// If type is empty, save in skill root directory
 			fileDir = skillDir
@@ -237,14 +249,22 @@ func (s *SkillService) getSkillWithValidation(skillName, outputDir string) error
 			return err
 		}
 
-		filePath := filepath.Join(fileDir, finalName)
-		if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		filePath := filepath.Join(fileDir, resource.Name)
+		if err := os.WriteFile(filePath, []byte(resource.Content), 0644); err != nil {
 			return err
 		}
 	}
 
+	// Build Skill struct for generating SKILL.md
+	skill := &Skill{
+		Name:        skillDetail.Name,
+		Description: skillDetail.Description,
+		Instruction: skillDetail.Instruction,
+		UniformId:   skillDetail.UniformId,
+	}
+
 	// Generate SKILL.md
-	if err := s.generateSkillMD(skillDir, &skill, resourceContents); err != nil {
+	if err := s.generateSkillMD(skillDir, skill, resourceContents); err != nil {
 		return err
 	}
 
