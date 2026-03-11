@@ -13,6 +13,8 @@ import (
 	"github.com/nov11/nacos-cli/internal/skill"
 )
 
+const defaultDescLimit = 200
+
 // Terminal represents an interactive terminal
 type Terminal struct {
 	client       *client.NacosClient
@@ -283,7 +285,6 @@ func (t *Terminal) listSkills(args []string) {
 	// Parse flags
 	var name string
 	var page, size int = 1, 20
-	var showDesc bool = false
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -317,8 +318,6 @@ func (t *Terminal) listSkills(args []string) {
 		} else if arg == "--size=" && i+1 < len(args) {
 			i++
 			fmt.Sscanf(args[i], "%d", &size)
-		} else if arg == "--desc" {
-			showDesc = true
 		}
 	}
 
@@ -345,8 +344,9 @@ func (t *Terminal) listSkills(args []string) {
 	fmt.Printf("\n\033[1;36mSkill List\033[0m \033[90m(Page: %d/%d, Total: %d)\033[0m\n", page, (totalCount+size-1)/size, totalCount)
 	fmt.Println("\033[36m═══════════════════════════════════════════════════════════════════════════════\033[0m")
 	for i, skill := range skills {
-		if showDesc && skill.Description != "" {
-			fmt.Printf("\033[90m%3d.\033[0m \033[32m%s\033[0m \033[90m- %s\033[0m\n", (page-1)*size+i+1, skill.Name, skill.Description)
+		if skill.Description != "" {
+			desc := truncateDesc(skill.Description, defaultDescLimit)
+			fmt.Printf("\033[90m%3d.\033[0m \033[32m%s\033[0m \033[90m- %s\033[0m\n", (page-1)*size+i+1, skill.Name, desc)
 		} else {
 			fmt.Printf("\033[90m%3d.\033[0m \033[32m%s\033[0m\n", (page-1)*size+i+1, skill.Name)
 		}
@@ -724,4 +724,13 @@ func (t *Terminal) showConfigSetHelp() {
 
 func (t *Terminal) showSkillSyncHelp() {
 	help.SkillSync.FormatForTerminal()
+}
+
+// truncateDesc truncates description to maxLen and appends ...... if needed
+func truncateDesc(desc string, maxLen int) string {
+	runes := []rune(desc)
+	if len(runes) <= maxLen {
+		return desc
+	}
+	return string(runes[:maxLen]) + "......"
 }
