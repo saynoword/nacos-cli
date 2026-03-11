@@ -22,6 +22,7 @@ var (
 	accessKey  string
 	secretKey  string
 	configFile string
+	profile    string // Profile name for config file (default, dev, prod, etc.)
 )
 
 var rootCmd = &cobra.Command{
@@ -30,14 +31,48 @@ var rootCmd = &cobra.Command{
 	Long: `Nacos CLI is a powerful command-line tool for interacting with Nacos.
 It supports configuration management, skill management, and provides an interactive terminal.`,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// Load configuration from file if specified
+		// Skip config loading for help commands
+		if cmd.Name() == "help" || cmd.Name() == "completion" {
+			return
+		}
+
+		// Determine config loading strategy
+		// Priority: --config > --profile > default profile
 		var fileConfig *config.Config
+		var configPath string
+		var err error
+
+		// Check if any connection parameters are provided via command line
+		hasCommandLineConfig := host != "" || port > 0 || serverAddr != "" || username != "" || password != "" || accessKey != "" || secretKey != ""
+
 		if configFile != "" {
-			cfg, err := config.LoadConfig(configFile)
+			// Explicit config file specified
+			fileConfig, err = config.LoadConfig(configFile)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: Failed to load config file: %v\n", err)
-			} else {
-				fileConfig = cfg
+			}
+			configPath = configFile
+		} else if !hasCommandLineConfig {
+			// No command line config provided, use profile-based config
+			// This will load, prompt for missing fields, and save
+			profileName := profile
+			if profileName == "" {
+				profileName = config.DefaultProfile
+			}
+			fileConfig, configPath, err = config.LoadOrCreateConfig(profileName)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: Failed to load or create config: %v\n", err)
+				os.Exit(1)
+			}
+		} else if profile != "" {
+			// Profile specified along with some command line args
+			// Load profile config as base, command line args will override
+			configPath, err = config.GetProfileConfigPath(profile)
+			if err == nil {
+				fileConfig, err = config.LoadConfig(configPath)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: Failed to load profile config: %v\n", err)
+				}
 			}
 		}
 
@@ -129,6 +164,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&host, "host", "", "Nacos server host (e.g., 127.0.0.1)")
 	rootCmd.PersistentFlags().IntVar(&port, "port", 0, "Nacos server port (e.g., 8848)")
 	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "", "Path to configuration file")
+	rootCmd.PersistentFlags().StringVar(&profile, "profile", "", "Profile name (e.g., dev, prod). Loads ~/.nacos-cli/<profile>.conf")
 
 	// Global flags - legacy style (for backward compatibility)
 	rootCmd.PersistentFlags().StringVarP(&serverAddr, "server", "s", "", "Nacos server address (e.g., 127.0.0.1:8848)")
