@@ -378,3 +378,164 @@ func LoadOrCreateConfig(profile string) (*Config, string, error) {
 
 	return cfg, configPath, nil
 }
+
+// PromptForUpdate prompts the user to update existing configuration fields
+// Shows current values (passwords masked) as defaults
+func (c *Config) PromptForUpdate() error {
+	reader := bufio.NewReader(os.Stdin)
+
+	// Helper to format current value display
+	formatCurrent := func(val string, isMasked bool) string {
+		if val == "" {
+			return ""
+		}
+		if isMasked {
+			return "******"
+		}
+		return val
+	}
+
+	// Host
+	currentHost := formatCurrent(c.Host, false)
+	if currentHost != "" {
+		fmt.Printf("Enter Nacos host [%s]: ", currentHost)
+	} else {
+		fmt.Print("Enter Nacos host [127.0.0.1]: ")
+	}
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read host: %w", err)
+	}
+	input = strings.TrimSpace(input)
+	if input != "" {
+		c.Host = input
+	} else if c.Host == "" {
+		c.Host = "127.0.0.1"
+	}
+
+	// Port
+	currentPort := "8848"
+	if c.Port > 0 {
+		currentPort = strconv.Itoa(c.Port)
+	}
+	fmt.Printf("Enter Nacos port [%s]: ", currentPort)
+	input, err = reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read port: %w", err)
+	}
+	input = strings.TrimSpace(input)
+	if input != "" {
+		port, err := strconv.Atoi(input)
+		if err != nil {
+			return fmt.Errorf("invalid port number: %w", err)
+		}
+		c.Port = port
+	} else if c.Port == 0 {
+		c.Port = 8848
+	}
+
+	// Auth type
+	currentAuthType := c.AuthType
+	if currentAuthType == "" {
+		currentAuthType = "nacos"
+	}
+	fmt.Printf("Enter auth type (nacos/aliyun) [%s]: ", currentAuthType)
+	input, err = reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read auth type: %w", err)
+	}
+	input = strings.TrimSpace(strings.ToLower(input))
+	if input != "" {
+		if input != "nacos" && input != "aliyun" {
+			return fmt.Errorf("invalid auth type: %s (must be 'nacos' or 'aliyun')", input)
+		}
+		c.AuthType = input
+	} else if c.AuthType == "" {
+		c.AuthType = "nacos"
+	}
+
+	// Credentials based on auth type
+	if c.AuthType == "aliyun" {
+		// AccessKey
+		currentAK := formatCurrent(c.AccessKey, false)
+		if currentAK != "" {
+			fmt.Printf("Enter AccessKey [%s]: ", currentAK)
+		} else {
+			fmt.Print("Enter AccessKey: ")
+		}
+		input, err = reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read access key: %w", err)
+		}
+		input = strings.TrimSpace(input)
+		if input != "" {
+			c.AccessKey = input
+		}
+		if c.AccessKey == "" {
+			return fmt.Errorf("access key is required for aliyun auth")
+		}
+
+		// SecretKey
+		if c.SecretKey != "" {
+			fmt.Print("Enter SecretKey [******] (press Enter to keep current): ")
+		} else {
+			fmt.Print("Enter SecretKey: ")
+		}
+		newSK := readPassword(reader)
+		if newSK != "" {
+			c.SecretKey = newSK
+		}
+		if c.SecretKey == "" {
+			return fmt.Errorf("secret key is required for aliyun auth")
+		}
+	} else {
+		// Nacos auth - Username
+		currentUser := formatCurrent(c.Username, false)
+		if currentUser != "" {
+			fmt.Printf("Enter username [%s]: ", currentUser)
+		} else {
+			fmt.Print("Enter username [nacos]: ")
+		}
+		input, err = reader.ReadString('\n')
+		if err != nil {
+			return fmt.Errorf("failed to read username: %w", err)
+		}
+		input = strings.TrimSpace(input)
+		if input != "" {
+			c.Username = input
+		} else if c.Username == "" {
+			c.Username = "nacos"
+		}
+
+		// Password
+		if c.Password != "" {
+			fmt.Print("Enter password [******] (press Enter to keep current): ")
+		} else {
+			fmt.Print("Enter password [nacos]: ")
+		}
+		newPwd := readPassword(reader)
+		if newPwd != "" {
+			c.Password = newPwd
+		} else if c.Password == "" {
+			c.Password = "nacos"
+		}
+	}
+
+	// Namespace
+	currentNS := c.Namespace
+	if currentNS != "" {
+		fmt.Printf("Enter namespace [%s]: ", currentNS)
+	} else {
+		fmt.Print("Enter namespace (leave empty for public): ")
+	}
+	input, err = reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("failed to read namespace: %w", err)
+	}
+	input = strings.TrimSpace(input)
+	if input != "" {
+		c.Namespace = input
+	}
+
+	return nil
+}
