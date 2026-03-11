@@ -207,14 +207,16 @@ func (c *Config) PromptForMissingFields() error {
 
 	// Prompt for host if missing
 	if c.Host == "" {
-		fmt.Print("Enter Nacos host (e.g., 127.0.0.1): ")
+		fmt.Print("Enter Nacos host [127.0.0.1]: ")
 		input, err := reader.ReadString('\n')
 		if err != nil {
 			return fmt.Errorf("failed to read host: %w", err)
 		}
-		c.Host = strings.TrimSpace(input)
-		if c.Host == "" {
-			return fmt.Errorf("host is required")
+		input = strings.TrimSpace(input)
+		if input == "" {
+			c.Host = "127.0.0.1"
+		} else {
+			c.Host = input
 		}
 	}
 
