@@ -68,6 +68,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
+	if err := config.DecryptSensitiveFields(); err != nil {
+		return nil, fmt.Errorf("failed to decrypt config file: %w", err)
+	}
 
 	return &config, nil
 }
@@ -117,7 +120,10 @@ func EnsureConfigDir() error {
 	if err != nil {
 		return err
 	}
-	return os.MkdirAll(configDir, 0755)
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		return err
+	}
+	return os.Chmod(configDir, 0700)
 }
 
 // IsComplete checks if the configuration has all required fields for authentication
@@ -202,12 +208,17 @@ func (c *Config) SaveConfig(configPath string) error {
 
 	// Ensure parent directory exists
 	parentDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(parentDir, 0755); err != nil {
+	if err := os.MkdirAll(parentDir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
+	configToSave := *c
+	if err := configToSave.EncryptSensitiveFields(); err != nil {
+		return fmt.Errorf("failed to encrypt config: %w", err)
+	}
+
 	// Marshal to YAML
-	data, err := yaml.Marshal(c)
+	data, err := yaml.Marshal(&configToSave)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
@@ -218,6 +229,75 @@ func (c *Config) SaveConfig(configPath string) error {
 	}
 
 	return nil
+}
+
+// EncryptSensitiveFields encrypts credential fields before writing them to disk.
+func (c *Config) EncryptSensitiveFields() error {
+	var err error
+	if c.Username, err = encryptValue(c.Username); err != nil {
+		return fmt.Errorf("username: %w", err)
+	}
+	if c.Password, err = encryptValue(c.Password); err != nil {
+		return fmt.Errorf("password: %w", err)
+	}
+	if c.AccessKey, err = encryptValue(c.AccessKey); err != nil {
+		return fmt.Errorf("accessKey: %w", err)
+	}
+	if c.SecretKey, err = encryptValue(c.SecretKey); err != nil {
+		return fmt.Errorf("secretKey: %w", err)
+	}
+	if c.SecurityToken, err = encryptValue(c.SecurityToken); err != nil {
+		return fmt.Errorf("securityToken: %w", err)
+	}
+	return nil
+}
+
+// DecryptSensitiveFields decrypts credential fields after reading them from disk.
+func (c *Config) DecryptSensitiveFields() error {
+	var err error
+	if c.Username, err = decryptValue(c.Username); err != nil {
+		return fmt.Errorf("username: %w", err)
+	}
+	if c.Password, err = decryptValue(c.Password); err != nil {
+		return fmt.Errorf("password: %w", err)
+	}
+	if c.AccessKey, err = decryptValue(c.AccessKey); err != nil {
+		return fmt.Errorf("accessKey: %w", err)
+	}
+	if c.SecretKey, err = decryptValue(c.SecretKey); err != nil {
+		return fmt.Errorf("secretKey: %w", err)
+	}
+	if c.SecurityToken, err = decryptValue(c.SecurityToken); err != nil {
+		return fmt.Errorf("securityToken: %w", err)
+	}
+	return nil
+}
+
+func (c *Config) hasPlaintextSensitiveFields() bool {
+	for _, value := range []string{
+		c.Username,
+		c.Password,
+		c.AccessKey,
+		c.SecretKey,
+		c.SecurityToken,
+	} {
+		if value != "" && !isEncryptedValue(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func configFileHasPlaintextSensitiveFields(configPath string) (bool, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return false, err
+	}
+	var raw Config
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return false, err
+	}
+	return raw.hasPlaintextSensitiveFields(), nil
 }
 
 // PromptForMissingFields interactively prompts the user to input missing configuration fields
@@ -365,9 +445,17 @@ func LoadOrCreateConfig(profile string) (*Config, string, error) {
 	var cfg *Config
 
 	// Try to load existing config
+	hasPlaintextSensitiveFields := false
 	if _, err := os.Stat(configPath); err == nil {
+		hasPlaintextSensitiveFields, err = configFileHasPlaintextSensitiveFields(configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to inspect config from %s: %v\n", configPath, err)
+		}
 		cfg, err = LoadConfig(configPath)
 		if err != nil {
+			if strings.Contains(err.Error(), "failed to decrypt") {
+				return nil, "", err
+			}
 			fmt.Printf("Warning: Failed to load config from %s: %v\n", configPath, err)
 			cfg = &Config{}
 		}
@@ -393,6 +481,12 @@ func LoadOrCreateConfig(profile string) (*Config, string, error) {
 			fmt.Printf("Warning: Failed to save config to %s: %v\n", configPath, err)
 		} else {
 			fmt.Printf("Configuration saved to %s\n", configPath)
+		}
+	} else if hasPlaintextSensitiveFields {
+		if err := cfg.SaveConfig(configPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to encrypt sensitive fields in %s: %v\n", configPath, err)
+		} else {
+			fmt.Fprintf(os.Stderr, "Encrypted sensitive fields in %s\n", configPath)
 		}
 	}
 
@@ -480,7 +574,7 @@ func (c *Config) PromptForUpdate() error {
 	// Credentials based on auth type
 	if c.AuthType == "aliyun" {
 		// AccessKey
-		currentAK := formatCurrent(c.AccessKey, false)
+		currentAK := formatCurrent(c.AccessKey, true)
 		if currentAK != "" {
 			fmt.Printf("Enter AccessKey [%s]: ", currentAK)
 		} else {
@@ -516,7 +610,7 @@ func (c *Config) PromptForUpdate() error {
 		fmt.Println("Note: sts-hiclaw credentials are obtained from HICLAW_CONTROLLER_URL and HICLAW_AUTH_TOKEN_FILE environment variables.")
 	} else if c.AuthType == "nacos" {
 		// Nacos auth - Username
-		currentUser := formatCurrent(c.Username, false)
+		currentUser := formatCurrent(c.Username, true)
 		if currentUser != "" {
 			fmt.Printf("Enter username [%s]: ", currentUser)
 		} else {

@@ -343,7 +343,7 @@ func (c *NacosClient) fetchStsCredentials() error {
 	}
 	if c.Verbose {
 		fmt.Fprintf(os.Stderr, "[debug] STS response status: %d\n", resp.StatusCode())
-		fmt.Fprintf(os.Stderr, "[debug] STS response body: %s\n", string(resp.Body()))
+		fmt.Fprintf(os.Stderr, "[debug] STS response body length: %d\n", len(resp.Body()))
 	}
 	if resp.StatusCode() != 200 {
 		fmt.Fprintf(os.Stderr, "[warn] sts-hiclaw: STS endpoint returned HTTP %d\n", resp.StatusCode())
@@ -357,7 +357,7 @@ func (c *NacosClient) fetchStsCredentials() error {
 	c.SecretKey = stsResp.AccessKeySecret
 	c.SecurityToken = stsResp.SecurityToken
 	if c.Verbose {
-		fmt.Fprintf(os.Stderr, "[debug] STS credentials obtained: accessKey=%s\n", c.AccessKey)
+		fmt.Fprintf(os.Stderr, "[debug] STS credentials obtained: accessKey=%s\n", maskAccessKey(c.AccessKey))
 	}
 	if stsResp.ExpiresInSec > 0 {
 		c.stsCredExpireAt = time.Now().Add(time.Duration(stsResp.ExpiresInSec) * time.Second)

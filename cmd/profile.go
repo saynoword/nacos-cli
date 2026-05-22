@@ -53,6 +53,10 @@ Examples:
 		if _, err := os.Stat(configPath); err == nil {
 			cfg, err = config.LoadConfig(configPath)
 			if err != nil {
+				if strings.Contains(err.Error(), "failed to decrypt") {
+					fmt.Fprintf(os.Stderr, "Error: Failed to load existing config: %v\n", err)
+					os.Exit(1)
+				}
 				fmt.Printf("Warning: Failed to load existing config: %v\n", err)
 				cfg = &config.Config{}
 			}
@@ -182,13 +186,13 @@ Examples:
 		fmt.Printf("%-15s %s\n", "auth-type:", cfg.AuthType)
 		switch cfg.AuthType {
 		case "aliyun":
-			fmt.Printf("%-15s %s\n", "access-key:", cfg.AccessKey)
-			fmt.Printf("%-15s %s\n", "secret-key:", maskPassword(cfg.SecretKey))
+			fmt.Printf("%-15s %s\n", "access-key:", maskSensitiveValue(cfg.AccessKey))
+			fmt.Printf("%-15s %s\n", "secret-key:", maskSensitiveValue(cfg.SecretKey))
 		case "sts-hiclaw":
 			fmt.Printf("%-15s %s\n", "credentials:", "from HICLAW_CONTROLLER_URL and HICLAW_AUTH_TOKEN_FILE env vars")
 		default:
-			fmt.Printf("%-15s %s\n", "username:", cfg.Username)
-			fmt.Printf("%-15s %s\n", "password:", maskPassword(cfg.Password))
+			fmt.Printf("%-15s %s\n", "username:", maskSensitiveValue(cfg.Username))
+			fmt.Printf("%-15s %s\n", "password:", maskSensitiveValue(cfg.Password))
 		}
 		if cfg.Namespace != "" {
 			fmt.Printf("%-15s %s\n", "namespace:", cfg.Namespace)
@@ -198,9 +202,9 @@ Examples:
 	},
 }
 
-// maskPassword masks a password string for display
-func maskPassword(pwd string) string {
-	if pwd == "" {
+// maskSensitiveValue masks a sensitive config value for display.
+func maskSensitiveValue(value string) string {
+	if value == "" {
 		return "(not set)"
 	}
 	return "******"

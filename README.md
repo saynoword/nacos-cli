@@ -376,44 +376,42 @@ nacos> quit           # Exit terminal
 | --config | -c | | Path to configuration file |
 | --help | -h | | Show help information |
 
-## Configuration File
+## Profile Configuration
 
-You can use a configuration file to avoid typing credentials every time:
+Use `profile edit` to create or update a profile configuration:
 
 ```bash
-# Create a config file
-cat > local.conf << EOF
-host: 127.0.0.1
-port: 8848
-username: nacos
-password: nacos
-namespace: ""
-EOF
+# Create or update the default profile
+nacos-cli profile edit
 
-# Use the config file
-nacos-cli --config ./local.conf skill-list
+# Create or update a named profile
+nacos-cli profile edit dev
+
+# Use the profile
+nacos-cli --profile dev skill-list
 ```
 
-### Configuration File Format
+Profile files are stored under `~/.nacos-cli/<profile>.conf`. They are YAML
+files managed by the CLI, and sensitive fields are encrypted before they are
+saved.
 
-The configuration file uses YAML format:
+Example generated profile:
 
 ```yaml
-# Nacos server host
 host: 127.0.0.1
-
-# Nacos server port
 port: 8848
-
-# Username for authentication
-username: nacos
-
-# Password for authentication
-password: nacos
-
-# Namespace ID (optional, leave empty for public namespace)
+authType: nacos
+username: ENC[v1:aes-256-gcm:...]
+password: ENC[v1:aes-256-gcm:...]
 namespace: ""
 ```
+
+Sensitive fields (`username`, `password`, `accessKey`, `secretKey`, and
+`securityToken`) are encrypted with AES-256-GCM before being saved by the CLI.
+The local encryption key is stored at `~/.nacos-cli/key` with `0600`
+permissions. Existing plaintext config files remain readable for backward
+compatibility; the next profile load or `profile edit` rewrites sensitive fields
+in encrypted form.
 
 ### Configuration Priority
 
