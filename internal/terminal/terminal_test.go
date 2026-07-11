@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -275,6 +276,74 @@ func TestParseSkillUploadOverwrite(t *testing.T) {
 	}
 }
 
+func TestUploadSkillForwardsOverwrite(t *testing.T) {
+	tests := []struct {
+		name string
+		args func(t *testing.T) []string
+	}{
+		{
+			name: "single zip",
+			args: func(t *testing.T) []string {
+				t.Helper()
+				zipPath := filepath.Join(t.TempDir(), "demo.zip")
+				if err := os.WriteFile(zipPath, []byte("zip content"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return []string{zipPath, "--overwrite", "true"}
+			},
+		},
+		{
+			name: "all skills",
+			args: func(t *testing.T) []string {
+				t.Helper()
+				folderPath := t.TempDir()
+				skillPath := filepath.Join(folderPath, "demo")
+				if err := os.Mkdir(skillPath, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(skillPath, "SKILL.md"), []byte("# Demo\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return []string{"--all", folderPath, "--overwrite", "true"}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			overwriteValue := ""
+			term := NewTerminal(&client.NacosClient{
+				ServerAddr: "example.test",
+				Scheme:     "http",
+				Namespace:  "test-namespace",
+				AuthType:   client.AuthTypeNone,
+			})
+			term.client.HTTPClient().Transport = terminalRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+				overwriteValue = r.URL.Query().Get("overwrite")
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader("")),
+					Request:    r,
+				}, nil
+			})
+			captureTerminalStdout(t, func() {
+				term.uploadSkill(tt.args(t))
+			})
+
+			if overwriteValue != "true" {
+				t.Fatalf("overwrite = %q, want true", overwriteValue)
+			}
+		})
+	}
+}
+
+type terminalRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f terminalRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
 func TestParseCommandArgsEdgeCases(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -356,6 +425,17 @@ func TestCompleterCompletesCommands(t *testing.T) {
 		t.Fatalf("offset = %d, want %d", offset, len("skill-u"))
 	}
 	assertCompletionSuffix(t, got, "pload")
+}
+
+func TestCompleterCompletesSkillUploadOverwriteFlag(t *testing.T) {
+	c := completer()
+	line := []rune("skill-upload ./demo --over")
+	got, offset := c.Do(line, len(line))
+
+	if offset != len("--over") {
+		t.Fatalf("offset = %d, want %d", offset, len("--over"))
+	}
+	assertCompletionSuffix(t, got, "write")
 }
 
 func TestCompleterCompletesPathArgument(t *testing.T) {

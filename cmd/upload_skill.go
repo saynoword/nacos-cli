@@ -43,16 +43,12 @@ type overwriteFlagValue struct {
 }
 
 func (flag overwriteFlagValue) Set(value string) error {
-	switch value {
-	case "false":
-		*flag.value = false
-		return nil
-	case "true":
-		*flag.value = true
-		return nil
-	default:
-		return fmt.Errorf("--overwrite must be true or false")
+	overwrite, err := skill.ParseUploadOverwrite(value)
+	if err != nil {
+		return err
 	}
+	*flag.value = overwrite
+	return nil
 }
 
 func (flag overwriteFlagValue) String() string {
