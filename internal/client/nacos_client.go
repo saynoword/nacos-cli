@@ -94,14 +94,7 @@ type V3Response struct {
 // ParseHTTPError converts an HTTP error response into a user-friendly error message.
 // It handles common HTTP status codes with actionable hints.
 func ParseHTTPError(statusCode int, body []byte, operation string) error {
-	// Try to extract message from v3 response body
-	serverMsg := ""
-	if len(body) > 0 {
-		var v3 V3Response
-		if err := json.Unmarshal(body, &v3); err == nil && v3.Message != "" {
-			serverMsg = v3.Message
-		}
-	}
+	serverMsg := extractV3ErrorMessage(body)
 
 	switch statusCode {
 	case 401:
@@ -113,6 +106,9 @@ func ParseHTTPError(statusCode int, body []byte, operation string) error {
 	case 403:
 		hint := "access denied — credentials may be expired or you lack permission for this operation"
 		if serverMsg != "" {
+			if !strings.EqualFold(serverMsg, "access denied") {
+				return fmt.Errorf("%s failed (403 Forbidden): %s", operation, serverMsg)
+			}
 			return fmt.Errorf("%s failed (403 Forbidden): %s\nHint: %s", operation, serverMsg, hint)
 		}
 		return fmt.Errorf("%s failed (403 Forbidden): %s", operation, hint)
@@ -142,6 +138,25 @@ func ParseHTTPError(statusCode int, body []byte, operation string) error {
 		}
 		return fmt.Errorf("%s failed (HTTP %d)", operation, statusCode)
 	}
+}
+
+func extractV3ErrorMessage(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	var v3 V3Response
+	if err := json.Unmarshal(body, &v3); err != nil {
+		return ""
+	}
+	if len(v3.Data) > 0 && string(v3.Data) != "null" {
+		var dataMsg string
+		if err := json.Unmarshal(v3.Data, &dataMsg); err == nil {
+			if dataMsg = strings.TrimSpace(dataMsg); dataMsg != "" {
+				return dataMsg
+			}
+		}
+	}
+	return strings.TrimSpace(v3.Message)
 }
 
 // NewNacosClient creates a new Nacos client with automatic authentication.

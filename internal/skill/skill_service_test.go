@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -366,6 +367,56 @@ func TestOfflineSkillSendsVersionScopeParams(t *testing.T) {
 	}
 	if !offlineCalled {
 		t.Fatal("offline was not called")
+	}
+}
+
+func TestSkillUnavailableMessageAnonymousKeepsNotFound(t *testing.T) {
+	service := &SkillService{client: &client.NacosClient{AuthType: client.AuthTypeNone}}
+
+	msg := service.SkillUnavailableMessage("demo-skill")
+
+	if msg != "skill 'demo-skill' not found on server" {
+		t.Fatalf("message = %q", msg)
+	}
+}
+
+func TestSkillUnavailableMessageAuthenticatedMentionsVisibility(t *testing.T) {
+	service := &SkillService{client: &client.NacosClient{AuthType: client.AuthTypeNacos}}
+
+	msg := service.SkillUnavailableMessage("demo-skill")
+
+	if !strings.Contains(msg, "not found or not visible to current account") {
+		t.Fatalf("message should mention visibility, got %q", msg)
+	}
+	if !strings.Contains(msg, "make it PUBLIC") {
+		t.Fatalf("message should include owner action hint, got %q", msg)
+	}
+	if strings.Contains(msg, "grant read visibility") {
+		t.Fatalf("message should not mention unsupported read visibility grants, got %q", msg)
+	}
+}
+
+func TestSkillLookupErrorMessageRewritesNotFound(t *testing.T) {
+	service := &SkillService{client: &client.NacosClient{AuthType: client.AuthTypeNacos}}
+
+	msg := service.SkillLookupErrorMessage("demo-skill",
+		errors.New("describe skill failed (404 Not Found): Skill not found: demo-skill"))
+
+	if !strings.Contains(msg, "not found or not visible to current account") {
+		t.Fatalf("message should mention visibility, got %q", msg)
+	}
+	if strings.Contains(msg, "404 Not Found") {
+		t.Fatalf("message should hide raw 404 wording, got %q", msg)
+	}
+}
+
+func TestSkillLookupErrorMessageKeepsOtherErrors(t *testing.T) {
+	service := &SkillService{client: &client.NacosClient{AuthType: client.AuthTypeNacos}}
+
+	msg := service.SkillLookupErrorMessage("demo-skill", errors.New("server unavailable"))
+
+	if msg != "server unavailable" {
+		t.Fatalf("message = %q", msg)
 	}
 }
 

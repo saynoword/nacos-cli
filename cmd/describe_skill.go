@@ -26,7 +26,9 @@ var describeSkillCmd = &cobra.Command{
 		skillService := skill.NewSkillService(nacosClient)
 
 		detail, err := skillService.DescribeSkill(args[0])
-		checkError(err)
+		if err != nil {
+			checkError(fmt.Errorf("%s", skillService.SkillLookupErrorMessage(args[0], err)))
+		}
 
 		switch strings.ToLower(skillDescribeOutput) {
 		case "json":

@@ -74,7 +74,7 @@ var getSkillCmd = &cobra.Command{
 				failCount++
 				failedSkills = append(failedSkills, skillName)
 			} else if result.Deleted {
-				fmt.Fprintf(os.Stderr, "Error: skill '%s' not found on server\n", skillName)
+				fmt.Fprintf(os.Stderr, "Error: %s\n", skillService.SkillUnavailableMessage(skillName))
 				failCount++
 				failedSkills = append(failedSkills, skillName)
 			} else {

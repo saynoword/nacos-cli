@@ -661,6 +661,25 @@ type SkillQueryResult struct {
 	ZipBytes        []byte // ZIP payload when Updated=true
 }
 
+// SkillUnavailableMessage returns a user-facing message for 404 skill lookup responses.
+func (s *SkillService) SkillUnavailableMessage(skillName string) string {
+	if s.client == nil || s.client.AuthType == client.AuthTypeNone {
+		return fmt.Sprintf("skill '%s' not found on server", skillName)
+	}
+	return fmt.Sprintf("skill '%s' not found or not visible to current account\nHint: If this skill was shared by another user, ask the owner to make it PUBLIC.", skillName)
+}
+
+// SkillLookupErrorMessage rewrites not-found lookup errors without changing service semantics.
+func (s *SkillService) SkillLookupErrorMessage(skillName string, err error) string {
+	if err == nil {
+		return ""
+	}
+	if isSkillNotFoundError(err) {
+		return s.SkillUnavailableMessage(skillName)
+	}
+	return err.Error()
+}
+
 // FetchSkill performs a conditional skill download using the MD5 fingerprint.
 // If the server content matches the provided md5, HTTP 304 is returned and no ZIP is downloaded.
 // The returned ZIP payload is not extracted; callers decide when and where to apply it.

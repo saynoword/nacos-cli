@@ -952,7 +952,7 @@ func (t *Terminal) describeSkill(args []string) {
 	detail, err := t.skillService.DescribeSkill(skillName)
 	fmt.Print("\033[K")
 	if err != nil {
-		fmt.Printf("\033[31mError:\033[0m %v\n", err)
+		fmt.Printf("\033[31mError:\033[0m %s\n", t.skillService.SkillLookupErrorMessage(skillName, err))
 		return
 	}
 
@@ -1118,7 +1118,6 @@ func (t *Terminal) getSkill(args []string) {
 	// Track results
 	var successCount, failCount int
 	var failedSkills []string
-	var err error
 
 	// Process each skill
 	for i, skillName := range skillNames {
@@ -1127,9 +1126,13 @@ func (t *Terminal) getSkill(args []string) {
 		}
 		fmt.Printf("\033[90mDownloading skill: \033[33m%s\033[90m...\033[0m\n", skillName)
 
-		err = t.skillService.GetSkill(skillName, outputDir, version, label)
+		result, err := t.skillService.QuerySkill(skillName, outputDir, version, label, "")
 		if err != nil {
 			fmt.Printf("\033[31mError:\033[0m failed to download skill '%s': %v\n", skillName, err)
+			failCount++
+			failedSkills = append(failedSkills, skillName)
+		} else if result.Deleted {
+			fmt.Printf("\033[31mError:\033[0m %s\n", t.skillService.SkillUnavailableMessage(skillName))
 			failCount++
 			failedSkills = append(failedSkills, skillName)
 		} else {

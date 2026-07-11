@@ -3,6 +3,7 @@ package client
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -96,6 +97,40 @@ func TestNewNacosClientDefaultScheme(t *testing.T) {
 	}
 	if c.BaseURL() != "http://localhost:8848" {
 		t.Errorf("BaseURL() = %q, want %q", c.BaseURL(), "http://localhost:8848")
+	}
+}
+
+func TestParseHTTPErrorUsesV3DataMessage(t *testing.T) {
+	body := []byte(`{"code":10001,"data":"No permission to modify skill: ai-avatar-video. Current owner: nacos","message":"access denied"}`)
+
+	err := ParseHTTPError(http.StatusForbidden, body, "upload skill")
+	if err == nil {
+		t.Fatal("ParseHTTPError() returned nil")
+	}
+
+	got := err.Error()
+	if !strings.Contains(got, "No permission to modify skill: ai-avatar-video. Current owner: nacos") {
+		t.Fatalf("error = %q, want detailed server data message", got)
+	}
+	if strings.Contains(got, "(403 Forbidden): access denied\n") {
+		t.Fatalf("error = %q, should not prefer generic access denied message", got)
+	}
+	if strings.Contains(got, "Hint:") {
+		t.Fatalf("error = %q, should not add a generic hint when server data is specific", got)
+	}
+}
+
+func TestParseHTTPErrorFallsBackToV3Message(t *testing.T) {
+	body := []byte(`{"code":10001,"message":"access denied"}`)
+
+	err := ParseHTTPError(http.StatusForbidden, body, "upload skill")
+	if err == nil {
+		t.Fatal("ParseHTTPError() returned nil")
+	}
+
+	got := err.Error()
+	if !strings.Contains(got, "upload skill failed (403 Forbidden): access denied") {
+		t.Fatalf("error = %q, want fallback message", got)
 	}
 }
 
